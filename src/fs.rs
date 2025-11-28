@@ -1,3 +1,17 @@
+//! Filesystem utilities for path manipulation and directory scanning.
+//!
+//! This module provides functions for:
+//! - Environment variable expansion in paths
+//! - Path name manipulation for tmux windows/sessions
+//! - Recursive directory scanning with configurable markers and ignore patterns
+//!
+//! # Key Functions
+//!
+//! - [`expand`] - Expand environment variables in paths
+//! - [`get_included_paths_list`] - Scan directories for project paths
+//! - [`trim_window_name`] - Create short names for tmux windows
+//! - [`trim_session_name`] - Sanitize session names for tmux
+
 use crate::config::{Config, IncludeEntry};
 use crate::Error;
 
@@ -14,7 +28,30 @@ use std::path::PathBuf;
 
 const EMPTY_STR: &str = "";
 
-/// tries to expand env variables in string
+/// Expands environment variables in a path string.
+///
+/// Supports two formats:
+/// - Simple: `$VAR`
+/// - Braced: `${VAR}`
+///
+/// # Arguments
+///
+/// * `path` - A string slice containing potential environment variable references
+///
+/// # Returns
+///
+/// * `Ok(String)` - The path with all environment variables expanded
+/// * `Err(Error::EnvVar)` - If any referenced environment variable is not set
+///
+/// # Examples
+///
+/// ```ignore
+/// let path = expand("$HOME/projects")?;
+/// // Returns something like "/home/username/projects"
+///
+/// let path = expand("${XDG_CONFIG_HOME}/pfp")?;
+/// // Returns something like "/home/username/.config/pfp"
+/// ```
 pub(crate) fn expand(path: &str) -> Result<String, Error> {
     let re = Regex::new(r"\$\{?([^\}/]+)\}?")?;
     let mut errors: Vec<(VarError, String)> = Vec::new();
@@ -35,7 +72,29 @@ pub(crate) fn expand(path: &str) -> Result<String, Error> {
     Ok(result)
 }
 
-/// retains the tail of the path
+/// Creates a short window name from a full path.
+///
+/// Retains the last two path components, with the parent directory
+/// truncated to 4 characters. This creates compact but recognizable
+/// names for tmux windows.
+///
+/// # Arguments
+///
+/// * `path` - The full directory path
+///
+/// # Returns
+///
+/// A shortened path suitable for display as a tmux window name.
+///
+/// # Examples
+///
+/// ```ignore
+/// let name = trim_window_name("/home/user/projects/myapp")?;
+/// assert_eq!(name, "proj/myapp");
+///
+/// let name = trim_window_name("/var/log")?;
+/// assert_eq!(name, "/var/log"); // unchanged if pattern doesn't match
+/// ```
 pub(crate) fn trim_window_name(path: &str) -> Result<String, anyhow::Error> {
     let re = Regex::new(r"/(?P<first>[^/]+)/{1}(?P<second>[^/]+)$")?;
     let mut iter = re.captures_iter(path);
@@ -50,18 +109,68 @@ pub(crate) fn trim_window_name(path: &str) -> Result<String, anyhow::Error> {
     }
 }
 
-/// removes all dots from original name string
-/// (needed because dots are displayed as underscores in session name for some reason)
+/// Removes dots from a session name for tmux compatibility.
+///
+/// Tmux displays dots as underscores in session names, which can be confusing.
+/// This function removes all dots to ensure consistent display.
+///
+/// # Arguments
+///
+/// * `name` - The original session name
+///
+/// # Returns
+///
+/// The session name with all `.` characters removed.
+///
+/// # Examples
+///
+/// ```ignore
+/// let name = trim_session_name(&"my.project.name".to_string());
+/// assert_eq!(name, "myprojectname");
+/// ```
 pub(crate) fn trim_session_name(name: &String) -> String {
     let mut s = String::from(name);
     s.retain(|x| x != '.');
     s
 }
 
-/// receives path, mutable list and config
-/// updates list with entries from the path tree that should be included
-/// on intermediate steps, returns path_yields (indicates that this path yielded matches)
-/// intermediate paths are included if include_intermediate_paths = true
+/// Recursively scans directories and collects matching project paths.
+///
+/// This is the core scanning function that walks the filesystem tree,
+/// looking for directories that contain project markers. It respects
+/// ignore patterns and depth limits from the configuration.
+///
+/// # Arguments
+///
+/// * `path` - The starting directory path
+/// * `depth` - Current recursion depth (start with 0)
+/// * `output` - HashMap to populate with discovered paths
+/// * `include_entry` - Configuration for this scan operation
+/// * `config` - Global application configuration
+///
+/// # Returns
+///
+/// * `Ok(true)` - If this path or any of its children contained matches
+/// * `Ok(false)` - If no matches were found in this subtree
+/// * `Err(Error)` - On I/O or regex errors
+///
+/// # Algorithm
+///
+/// 1. Read the directory contents
+/// 2. Check if any marker files/directories exist
+/// 3. If marker found and `yield_on_marker` is true:
+///    - Add path to output and return (don't recurse further)
+/// 4. If marker found and `yield_on_marker` is false:
+///    - Mark as found but continue recursing
+/// 5. For each non-ignored subdirectory:
+///    - Recursively scan with incremented depth
+/// 6. If `include_intermediate_paths` is true and children matched:
+///    - Add this directory to output as well
+///
+/// # Mode Behavior
+///
+/// - `Mode::Dir` - Looks for directories containing markers
+/// - `Mode::File` - Collects all non-ignored files
 pub(crate) fn get_included_paths_list(
     path: &str,
     depth: u8,
@@ -287,6 +396,20 @@ fn get_path_string(entry: &DirEntry) -> Result<String, anyhow::Error> {
     })?))
 }
 
+/// Checks if a path is a directory, following symlinks.
+///
+/// For symlinks, this function reads the link target and checks if it's a directory.
+/// For regular entries, it simply checks the file type.
+///
+/// # Arguments
+///
+/// * `path` - The path to check
+/// * `ft` - The file type of the entry at `path`
+///
+/// # Returns
+///
+/// * `Ok(true)` - If the path is a directory (or a symlink to one)
+/// * `Ok(false)` - Otherwise
 pub(crate) fn is_dir(path: &str, ft: &FileType) -> Result<bool, std::io::Error> {
     if ft.is_symlink() {
         // read link and read its ft
@@ -299,6 +422,20 @@ pub(crate) fn is_dir(path: &str, ft: &FileType) -> Result<bool, std::io::Error> 
     }
 }
 
+/// Checks if a path is a regular file, following symlinks.
+///
+/// For symlinks, this function reads the link target and checks if it's a file.
+/// For regular entries, it simply checks the file type.
+///
+/// # Arguments
+///
+/// * `path` - The path to check
+/// * `ft` - The file type of the entry at `path`
+///
+/// # Returns
+///
+/// * `Ok(true)` - If the path is a file (or a symlink to one)
+/// * `Ok(false)` - Otherwise
 pub(crate) fn is_file(path: &str, ft: &FileType) -> Result<bool, std::io::Error> {
     if ft.is_symlink() {
         // read link and read its ft
@@ -322,6 +459,19 @@ fn read_link(path: &str) -> Option<std::path::PathBuf> {
     }
 }
 
+/// Convenience function to check if a path is a file using metadata.
+///
+/// This is a simpler alternative to [`is_file`] that doesn't require
+/// a pre-fetched file type. It reads the file's metadata directly.
+///
+/// # Arguments
+///
+/// * `path` - The path to check
+///
+/// # Returns
+///
+/// `true` if the path exists and is a regular file, `false` otherwise
+/// (including when metadata cannot be read).
 pub(crate) fn path_is_file(path: &str) -> bool {
     let meta = std::fs::metadata(path);
     match meta {

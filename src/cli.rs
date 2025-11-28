@@ -1,3 +1,23 @@
+//! Command-line interface implementation.
+//!
+//! This module defines the CLI using [clap](https://docs.rs/clap) and handles
+//! all subcommand dispatching.
+//!
+//! # Subcommands
+//!
+//! | Command | Description |
+//! |---------|-------------|
+//! | `new-session` | Pick a project and create a new tmux session |
+//! | `new-window` | Pick a project and create a new window |
+//! | `sessions` | List and switch between active sessions |
+//! | `kill-session` | Kill current session, switch to previous |
+//! | `start` | Start predefined sessions from config |
+//! | `print-config` | Print parsed configuration |
+//!
+//! # Global Options
+//!
+//! - `-c, --config <FILE>` - Path to configuration file
+
 use log::trace;
 use std::process;
 
@@ -8,9 +28,13 @@ use crate::tmux::{execute_tmux_command, execute_tmux_command_with_stdin, execute
 
 use clap::{Arg, ArgAction};
 
+/// Application name used in CLI help text
 static APP_NAME: &str = "pfp";
+
+/// Default configuration file path (supports environment variable expansion)
 static CONFIG_PATH_DEFAULT: &str = "${XDG_CONFIG_HOME}/pfp/config.json";
 
+// Subcommand names
 const KILL_SESSION_SUBC: &str = "kill-session";
 const SESSIONS_SUBC: &str = "sessions";
 const START_SUBC: &str = "start";
@@ -18,9 +42,29 @@ const PRINT_CONFIG_SUBC: &str = "print-config";
 const NEW_SESSION_SUBC: &str = "new-session";
 const NEW_WINDOW_SUBC: &str = "new-window";
 
+// Argument names
 const CONFIG_ARG: &str = "config";
-const START_INHERIT_STDIN_ARG: &str = "attach"; // inherit stdin
+const START_INHERIT_STDIN_ARG: &str = "attach";
 
+/// Main CLI entry point.
+///
+/// Parses command-line arguments, loads configuration, and dispatches
+/// to the appropriate subcommand handler.
+///
+/// # Returns
+///
+/// * `Ok(())` - Command executed successfully
+/// * `Err(Error)` - On any error during execution
+///
+/// # Subcommand Handlers
+///
+/// - **kill-session**: Gets current session, switches to last/previous, kills original
+/// - **print-config**: Prints parsed config to stdout
+/// - **sessions**: Lists active sessions, allows switching
+/// - **start**: Starts predefined sessions from config
+/// - **new-window**: Picks project, creates new window
+/// - **new-session**: Picks project, creates new session
+/// - **no subcommand**: Prints help message
 pub(crate) fn cli() -> Result<(), super::Error> {
     // parse cli args
     let mut cmd = clap::Command::new(APP_NAME)
