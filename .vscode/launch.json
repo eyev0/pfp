@@ -1,0 +1,57 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Debug pfp",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/pfp",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_LOG": "debug"
+            },
+            "console": "integratedTerminal",
+            "stopOnEntry": false
+        },
+        {
+            "name": "Debug pfp with args",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/pfp",
+            "args": ["--help"],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_LOG": "debug"
+            },
+            "console": "integratedTerminal",
+            "stopOnEntry": false
+        },
+        {
+            "name": "Debug pfp (release)",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/release/pfp",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_LOG": "debug"
+            },
+            "console": "integratedTerminal",
+            "stopOnEntry": false
+        },
+        {
+            "name": "Debug tests",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/target/debug/deps/pfp-*",
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_LOG": "debug"
+            },
+            "console": "integratedTerminal",
+            "stopOnEntry": false
+        }
+    ]
+} 
