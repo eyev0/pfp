@@ -15,7 +15,7 @@ A fast, ergonomic CLI tool for managing tmux sessions and windows with fuzzy pro
 - 📁 **Session Management** - Create, switch, and kill tmux sessions effortlessly
 - 🪟 **Window Management** - Quickly spawn new windows in your current session
 - 📋 **Predefined Sessions** - Configure and start your common work environments with one command
-- 🔧 **Highly Configurable** - Fine-tune scanning behavior, markers, and ignore patterns
+- 🔧 **Profile-Based Config** - Built-in profiles for common use cases + easy customization
 
 ## 📦 Installation
 
@@ -29,8 +29,8 @@ A fast, ergonomic CLI tool for managing tmux sessions and windows with fuzzy pro
 ### Build from Source
 
 ```bash
-git clone https://github.com/your-username/project-fuzzy-picker.git
-cd project-fuzzy-picker
+git clone https://github.com/your-username/pfp.git
+cd pfp
 cargo build --release
 
 # Install to PATH
@@ -62,22 +62,18 @@ Create a config file at `~/.config/pfp/config.json`:
 
 ```jsonc
 {
-  // Where to scan for projects
+  // Directories to scan (simple format uses "projects" profile)
   "include": [
-    {
-      "paths": ["$HOME/projects", "$HOME/work"],
-      "depth": 3
-    }
+    "$HOME/dev",
+    { "paths": ["$HOME/Downloads", "$HOME/Documents"], "profile": "browse" },
+    { "paths": ["$HOME/.config"], "profile": "files", "depth": 2 }
   ],
 
-  // What identifies a project root
-  "markers": {
-    "exact": [".git", "Cargo.toml", "go.mod", "package.json"]
-  },
-
-  // Directories to skip
-  "ignore": {
-    "exact": ["node_modules", "target", "venv", ".cache"]
+  // Override built-in profiles or create custom ones
+  "profiles": {
+    "projects": {
+      "markers": [".git", "Cargo.toml", "go.mod", "pom.xml"]
+    }
   },
 
   // Predefined sessions for quick start
@@ -93,6 +89,30 @@ Create a config file at `~/.config/pfp/config.json`:
 }
 ```
 
+### Built-in Profiles
+
+| Profile | Description |
+|---------|-------------|
+| `projects` | Find project directories by markers (`.git`, `Cargo.toml`, etc.) |
+| `browse` | Browse all directories (depth 2) |
+| `files` | Find all files (depth 1) |
+
+See [`defaults.json`](defaults.json) for full profile definitions and reference values.
+
+### Customizing Profiles
+
+Add only the fields you want to change — they merge with defaults:
+
+```jsonc
+{
+  "profiles": {
+    "projects": {
+      "markers": [".git", "Cargo.toml", "pom.xml"]  // Only override markers
+    }
+  }
+}
+```
+
 ## 📖 Commands
 
 | Command | Description |
@@ -102,6 +122,8 @@ Create a config file at `~/.config/pfp/config.json`:
 | `pfp sessions` | List active sessions → Switch to selected one |
 | `pfp kill-session` | Kill current session → Switch to previous |
 | `pfp start [-a]` | Start predefined sessions (optionally attach) |
+| `pfp open` | Pick a project → Print path (for shell integration) |
+| `pfp init <shell>` | Print shell function (`zsh`, `bash`, `fish`) |
 | `pfp print-config` | Print parsed configuration |
 
 ### Global Options
@@ -109,6 +131,18 @@ Create a config file at `~/.config/pfp/config.json`:
 | Option | Description |
 |--------|-------------|
 | `-c, --config <FILE>` | Custom config file path |
+
+## 🐚 Shell Integration
+
+Use `pfp init` to generate a shell function that lets you `cd` to projects directly:
+
+```bash
+# Add to ~/.zshrc or ~/.bashrc
+eval "$(pfp init zsh)"   # or bash, fish
+
+# Now use:
+pf              # fuzzy pick → cd to directory or open file in $EDITOR
+```
 
 ## ⌨️ Recommended tmux Keybindings
 
@@ -123,8 +157,8 @@ bind-key C-k run-shell "pfp kill-session"
 
 ## 📚 Documentation
 
-- **[Full API Documentation](docs/API.md)** - Complete reference for all modules, functions, and configuration options
-- **[Configuration Guide](docs/API.md#configuration)** - Detailed configuration schema and examples
+- **[Full API Documentation](docs/API.md)** - Complete reference for all modules and configuration
+- **[Default Profiles](defaults.json)** - Reference values for built-in profiles
 
 ## 🏗️ Project Structure
 
@@ -132,8 +166,8 @@ bind-key C-k run-shell "pfp kill-session"
 src/
 ├── main.rs      # Entry point & error types
 ├── cli.rs       # Command-line interface (clap)
-├── config.rs    # Configuration parsing & structures
-├── fs.rs        # Filesystem utilities & project scanning
+├── config.rs    # Configuration parsing & profiles
+├── fs.rs        # Filesystem scanning with glob patterns
 ├── fzf.rs       # FZF integration
 ├── selectors.rs # High-level selection functions
 └── tmux.rs      # Tmux command execution

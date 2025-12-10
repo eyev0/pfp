@@ -28,6 +28,7 @@
 
 mod cli;
 mod config;
+mod context;
 mod fs;
 mod fzf;
 mod selectors;
@@ -56,8 +57,8 @@ enum Error {
     IO(#[from] std::io::Error),
     #[error("Unwrap IO stream error: {0}")]
     UnwrapIOStream(&'static str),
-    #[error("Regex error: {0}")]
-    Regex(#[from] regex::Error),
+    #[error("Glob pattern error: {0}")]
+    GlobPattern(#[from] glob::PatternError),
     #[error("Env var error: {0}: {1}")]
     EnvVar(VarError, String),
     #[error("Parse utf8 error: {0}")]

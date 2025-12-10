@@ -25,7 +25,7 @@ pfp -c <file> <command>   # Use custom config file
 
 ```json
 {
-  "include": [{ "paths": ["$HOME/projects"] }]
+  "include": ["$HOME/dev"]
 }
 ```
 
@@ -33,31 +33,52 @@ pfp -c <file> <command>   # Use custom config file
 
 ```jsonc
 {
+  // Override built-in profiles or create custom ones
+  "profiles": {
+    "projects": {
+      "markers": [".git", "Cargo.toml", "pom.xml"]  // Only override markers
+    },
+    "scripts": {
+      "mode": "file",
+      "markers": ["*.sh", "*.py"],
+      "depth": 2
+    }
+  },
+
+  // Directories to scan
+  "include": [
+    "$HOME/dev",                                        // String = projects profile
+    { "paths": ["$HOME/Downloads"], "profile": "browse" },
+    { "paths": ["$HOME/.config"], "profile": "files", "depth": 2 }
+  ],
+
+  // Predefined tmux sessions
   "sessions": [
     { "name": "work", "windows": ["$HOME/api", "$HOME/web"] }
-  ],
-  "markers": {
-    "exact": [".git", "Cargo.toml"],   // Project root indicators
-    "pattern": [],                       // Regex patterns
-    "traverse_hidden": true,             // Descend into .dirs
-    "chain_root_markers": true           // Merge with entry markers
-  },
-  "ignore": {
-    "exact": ["node_modules", "target"], // Skip these dirs
-    "pattern": [],                        // Regex patterns
-    "chain_root_ignore": true             // Merge with entry ignore
-  },
-  "include": [
-    {
-      "paths": ["$HOME/projects"],        // Scan roots
-      "mode": "dir",                      // "dir" or "file"
-      "depth": 3,                         // Max recursion
-      "yield_on_marker": true,            // Stop at project root
-      "include_intermediate_paths": true  // Include parent dirs
-    }
   ]
 }
 ```
+
+## Built-in Profiles
+
+| Profile | Mode | Markers | Depth | Description |
+|---------|------|---------|-------|-------------|
+| `projects` | dir | `.git`, `Cargo.toml`, `go.mod`, `package.json` | 255 | Find project roots |
+| `browse` | dir | `*` | 2 | Browse all directories |
+| `files` | file | `*` | 1 | Find all files |
+
+See [`defaults.json`](../defaults.json) for full definitions.
+
+## Profile Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `mode` | `"dir"` / `"file"` | Scan for directories or files |
+| `markers` | `string[]` | Patterns to match (glob: `*.sh`, `tree-*`) |
+| `ignore` | `string[]` | Patterns to skip |
+| `depth` | `number` | Max recursion depth |
+| `stop_on_marker` | `boolean` | Stop at project root |
+| `intermediate_paths` | `boolean` | Include parent dirs |
 
 ## tmux.conf Keybindings
 
@@ -84,10 +105,9 @@ alias ps="pfp sessions"
 | `${XDG_CONFIG_HOME}` | Default config location |
 | `$EDITOR` | Editor for file mode |
 
-## Default Markers
+## Glob Patterns
 
-`.git`, `Cargo.toml`, `go.mod`
-
-## Default Ignores
-
-`node_modules`, `venv`, `bin`, `target`, `debug`, `src`, `test`, `tests`, `lib`, `docs`, `pkg`, `.DS_Store`
+- `".git"` — exact match
+- `"*.sh"` — files ending with .sh
+- `"tree-*"` — names starting with tree-
+- `"*"` — match everything

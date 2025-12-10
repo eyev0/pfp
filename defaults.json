@@ -1,0 +1,31 @@
+{
+  "profiles": {
+    "projects": {
+      "mode": "dir",
+      "markers": [".git", "Cargo.toml", "go.mod", "package.json"],
+      "ignore": ["node_modules", "target", "venv"],
+      "depth": 255,
+      "stop_on_marker": true,
+      "intermediate_paths": true,
+      "show_hidden": false,
+      "traverse_hidden_dirs": false
+    },
+    "browse": {
+      "mode": "dir",
+      "markers": ["*"],
+      "depth": 2,
+      "stop_on_marker": false,
+      "intermediate_paths": true,
+      "show_hidden": false,
+      "traverse_hidden_dirs": false
+    },
+    "files": {
+      "mode": "file",
+      "markers": ["*"],
+      "depth": 1,
+      "intermediate_paths": false,
+      "show_hidden": true,
+      "traverse_hidden_dirs": false
+    }
+  }
+}

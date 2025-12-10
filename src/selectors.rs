@@ -14,18 +14,18 @@ use log::trace;
 
 use crate::{
     config::Config,
-    fs::{expand, get_included_paths_list},
-    fzf::execute_fzf_command,
+    context::AppContext,
+    fs::scan_paths,
     Error,
 };
 
 /// Presents a list of items to the user for fuzzy selection.
 ///
-/// This is a thin wrapper around [`execute_fzf_command`]
-/// that adds a header and handles empty selections.
+/// This is a thin wrapper around fzf that adds a header and handles empty selections.
 ///
 /// # Arguments
 ///
+/// * `ctx` - Application context with fzf executor
 /// * `list` - Newline-separated items to present
 /// * `header` - Header text displayed at the top of fzf
 /// * `args` - Additional fzf arguments (layout, preview, etc.)
@@ -35,25 +35,19 @@ use crate::{
 /// * `Ok(String)` - The user's selection
 /// * `Err(Error::EmptyPick)` - If the user cancelled without selecting
 /// * `Err(Error)` - On other errors
-///
-/// # Example
-///
-/// ```ignore
-/// let result = select_from_list(
-///     "option1\noption2\noption3",
-///     "Choose an option:",
-///     &["--layout", "reverse"]
-/// )?;
-/// ```
 pub(crate) fn select_from_list(
+    ctx: &AppContext,
     list: &str,
     header: &'static str,
     args: &[&str],
-) -> Result<String, crate::Error> {
-    let result = execute_fzf_command(args.iter().chain(&["--header", header]).cloned(), list)?;
+) -> Result<String, Error> {
+    let mut full_args: Vec<&str> = args.to_vec();
+    full_args.extend(&["--header", header]);
+    
+    let result = ctx.fzf_execute(&full_args, list)?;
     if result.is_empty() {
         trace!("Empty pick");
-        Err(crate::Error::EmptyPick())
+        Err(Error::EmptyPick())
     } else {
         trace!("Pick: {}", result);
         Ok(result)
@@ -63,12 +57,13 @@ pub(crate) fn select_from_list(
 /// Scans for project directories and presents them for user selection.
 ///
 /// This is the main project picker function that:
-/// 1. Scans all configured include paths for project directories
+/// 1. Scans all configured include paths using their resolved profiles
 /// 2. Presents the found projects in fzf with tree preview
 /// 3. Returns the user's selection
 ///
 /// # Arguments
 ///
+/// * `ctx` - Application context with fzf executor
 /// * `config` - Application configuration containing scan settings
 /// * `header` - Header text for the fzf interface
 ///
@@ -76,37 +71,25 @@ pub(crate) fn select_from_list(
 ///
 /// * `Ok(String)` - The absolute path to the selected project
 /// * `Err(Error)` - On scan errors, cancelled selection, etc.
-///
-/// # Features
-///
-/// - Expands environment variables in configured paths
-/// - Shows `tree -C` preview of directories
-/// - Respects all marker and ignore settings from config
-///
-/// # Example
-///
-/// ```ignore
-/// let project_path = pick_project(&config, "Select a project:")?;
-/// println!("Opening: {}", project_path);
-/// ```
-pub(crate) fn pick_project(config: &Config, header: &'static str) -> Result<String, Error> {
-    // get dirs' paths
-    let dirs = {
-        let mut paths_set = HashMap::new();
-        for include_entry in config.include.iter() {
-            for path in &include_entry.paths {
-                let expanded_path = expand(path)?;
-                if include_entry.include_intermediate_paths {
-                    paths_set.insert(expanded_path.clone(), ());
-                }
-                get_included_paths_list(&expanded_path, 0, &mut paths_set, include_entry, config)?;
-            }
-        }
-        paths_set.into_keys().collect::<Vec<String>>().join("\n")
-    };
+pub(crate) fn pick_project(
+    ctx: &AppContext,
+    config: &Config,
+    header: &'static str,
+) -> Result<String, Error> {
+    let mut paths_set: HashMap<String, ()> = HashMap::new();
 
-    // pick one from list with fzf
+    // Scan all include entries
+    for entry in &config.include {
+        let profile = config.resolve_profile(entry);
+        let paths: Vec<&str> = entry.paths();
+        scan_paths(&paths, &profile, &mut paths_set)?;
+    }
+
+    let dirs = paths_set.into_keys().collect::<Vec<String>>().join("\n");
+
+    // Pick one from list with fzf
     let pick = select_from_list(
+        ctx,
         &dirs,
         header,
         &[
@@ -120,5 +103,6 @@ pub(crate) fn pick_project(config: &Config, header: &'static str) -> Result<Stri
     )?
     .trim_end()
     .to_owned();
+    
     Ok(pick)
 }
