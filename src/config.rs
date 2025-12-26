@@ -37,7 +37,7 @@ const DEFAULTS_JSON: &str = include_str!("../defaults.json");
 
 /// Errors that can occur during configuration parsing.
 #[derive(thiserror::Error, Debug)]
-pub(crate) enum ConfigError {
+pub enum ConfigError {
     /// JSON parsing error (syntax error, type mismatch, etc.)
     #[error("Parse config: {0}")]
     Parse(#[from] serde_jsonc::Error),
@@ -49,7 +49,7 @@ pub(crate) enum ConfigError {
 /// Scanning mode for profiles.
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum Mode {
+pub enum Mode {
     /// Scan for directories containing project markers (default)
     #[default]
     Dir,
@@ -62,7 +62,7 @@ pub(crate) enum Mode {
 /// All fields are optional to support partial overrides.
 /// When merging, specified fields override the base profile.
 #[derive(Deserialize, Debug, Clone, Default)]
-pub(crate) struct Profile {
+pub struct Profile {
     /// Name of another profile to inherit from.
     /// All fields from the base profile are copied, then this profile's
     /// explicit fields override them.
@@ -120,7 +120,7 @@ impl Profile {
 
 /// A fully resolved profile with no optional fields.
 #[derive(Debug, Clone)]
-pub(crate) struct ResolvedProfile {
+pub struct ResolvedProfile {
     pub mode: Mode,
     pub markers: Vec<String>,
     pub ignore: Vec<String>,
@@ -136,7 +136,7 @@ pub(crate) struct ResolvedProfile {
 /// An entry in the include array - either a simple path string or a detailed object.
 #[derive(Deserialize, Debug)]
 #[serde(untagged)]
-pub(crate) enum IncludeEntry {
+pub enum IncludeEntry {
     /// Simple path string - uses "projects" profile by default
     Simple(String),
     /// Detailed entry with paths, profile, and optional overrides
@@ -181,7 +181,7 @@ impl IncludeEntry {
 
 /// Detailed include entry with all options.
 #[derive(Deserialize, Debug)]
-pub(crate) struct IncludeEntryDetailed {
+pub struct IncludeEntryDetailed {
     /// Paths to scan (always an array)
     pub paths: Vec<String>,
     /// Profile name to use as base
@@ -207,7 +207,7 @@ pub(crate) struct IncludeEntryDetailed {
 
 /// A predefined tmux session configuration.
 #[derive(Deserialize, Debug)]
-pub(crate) struct Session {
+pub struct Session {
     /// The session name (displayed in tmux status bar)
     pub name: String,
     /// List of paths for windows in this session (supports env vars)
@@ -242,7 +242,7 @@ struct RawConfig {
 
 /// Main configuration structure with resolved profiles.
 #[derive(Debug)]
-pub(crate) struct Config {
+pub struct Config {
     /// All profiles (defaults merged with user overrides)
     pub profiles: HashMap<String, Profile>,
     /// List of paths to scan with their settings
@@ -294,7 +294,7 @@ fn load_defaults() -> HashMap<String, Profile> {
 /// * `Ok(Config)` - Successfully parsed configuration
 /// * `Err(ConfigError::Read)` - File could not be read
 /// * `Err(ConfigError::Parse)` - File contents are not valid JSON
-pub(crate) fn read_config(path: &str) -> Result<Config, ConfigError> {
+pub fn read_config(path: &str) -> Result<Config, ConfigError> {
     let contents = std::fs::read_to_string(path)?;
     let raw: RawConfig = serde_jsonc::from_str(&contents)?;
 
@@ -325,7 +325,7 @@ pub(crate) fn read_config(path: &str) -> Result<Config, ConfigError> {
 /// Resolve profile inheritance by processing `base` fields.
 /// Each profile with a `base` field inherits all fields from the base profile,
 /// with its own explicit fields taking precedence.
-fn resolve_inheritance(mut profiles: HashMap<String, Profile>) -> HashMap<String, Profile> {
+pub fn resolve_inheritance(mut profiles: HashMap<String, Profile>) -> HashMap<String, Profile> {
     // Get list of profile names that have a base
     let profiles_with_base: Vec<String> = profiles
         .iter()
