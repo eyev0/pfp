@@ -2,7 +2,7 @@
   "profiles": {
     "projects": {
       "mode": "dir",
-      "markers": [".git", "Cargo.toml", "go.mod", "package.json"],
+      "markers": [".git", "Cargo.toml", "go.mod", "package.json", ".project"],
       "ignore": ["node_modules", "target", "venv"],
       "depth": 255,
       "stop_on_marker": true,
