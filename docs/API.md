@@ -205,6 +205,7 @@ PFP uses **profiles** to define scanning behavior. Built-in profiles are embedde
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `base` | `string` | Name of another profile to inherit from |
 | `mode` | `"dir"` \| `"file"` | Scan for directories or files |
 | `markers` | `string[]` | Patterns to match (glob supported: `*.sh`, `tree-*`) |
 | `ignore` | `string[]` | Patterns to skip (glob supported) |
@@ -228,6 +229,31 @@ To customize a built-in profile, add it to your config with only the fields you 
 ```
 
 The final profile is merged: `defaults.json` ← `user profile` ← `include entry overrides`
+
+### Profile Inheritance
+
+Use the `base` field to create a profile that inherits from another profile:
+
+```jsonc
+{
+  "profiles": {
+    // Create a custom profile based on "projects"
+    "my_projects": {
+      "base": "projects",
+      "depth": 3,
+      "markers": [".git", "pom.xml"]  // Override markers
+    },
+
+    // Inheritance chains are supported
+    "deep_projects": {
+      "base": "my_projects",
+      "depth": 10  // Override depth, keep markers from my_projects
+    }
+  }
+}
+```
+
+All fields from the base profile are copied, then the child profile's explicit fields override them. This is useful for creating variations of existing profiles without duplicating all settings.
 
 ### Include Entry Format
 
@@ -258,6 +284,7 @@ Include entries can be:
 ```rust
 // Profile with optional fields for merging
 pub struct Profile {
+    pub base: Option<String>,  // Inherit from another profile
     pub mode: Option<Mode>,
     pub markers: Option<Vec<String>>,
     pub ignore: Option<Vec<String>>,

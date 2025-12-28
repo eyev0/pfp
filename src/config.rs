@@ -37,19 +37,22 @@ const DEFAULTS_JSON: &str = include_str!("../defaults.json");
 
 /// Errors that can occur during configuration parsing.
 #[derive(thiserror::Error, Debug)]
-pub(crate) enum ConfigError {
+pub enum ConfigError {
     /// JSON parsing error (syntax error, type mismatch, etc.)
     #[error("Parse config: {0}")]
     Parse(#[from] serde_jsonc::Error),
     /// File I/O error (file not found, permission denied, etc.)
     #[error("Read config: {0}")]
     Read(#[from] std::io::Error),
+    /// Circular profile inheritance detected
+    #[error("Circular profile inheritance: {0}")]
+    CircularInheritance(String),
 }
 
 /// Scanning mode for profiles.
 #[derive(Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
-pub(crate) enum Mode {
+pub enum Mode {
     /// Scan for directories containing project markers (default)
     #[default]
     Dir,
@@ -62,7 +65,11 @@ pub(crate) enum Mode {
 /// All fields are optional to support partial overrides.
 /// When merging, specified fields override the base profile.
 #[derive(Deserialize, Debug, Clone, Default)]
-pub(crate) struct Profile {
+pub struct Profile {
+    /// Name of another profile to inherit from.
+    /// All fields from the base profile are copied, then this profile's
+    /// explicit fields override them.
+    pub base: Option<String>,
     /// Scanning mode: `dir` for directories, `file` for files
     pub mode: Option<Mode>,
     /// Markers that identify targets (glob patterns supported)
@@ -84,8 +91,10 @@ pub(crate) struct Profile {
 impl Profile {
     /// Merge another profile on top of this one.
     /// Fields from `other` override fields in `self` if they are Some.
+    /// Note: `base` field is not merged, it's only used during config loading.
     pub fn merge(&self, other: &Profile) -> Profile {
         Profile {
+            base: other.base.clone().or_else(|| self.base.clone()),
             mode: other.mode.or(self.mode),
             markers: other.markers.clone().or_else(|| self.markers.clone()),
             ignore: other.ignore.clone().or_else(|| self.ignore.clone()),
@@ -114,7 +123,7 @@ impl Profile {
 
 /// A fully resolved profile with no optional fields.
 #[derive(Debug, Clone)]
-pub(crate) struct ResolvedProfile {
+pub struct ResolvedProfile {
     pub mode: Mode,
     pub markers: Vec<String>,
     pub ignore: Vec<String>,
@@ -130,7 +139,7 @@ pub(crate) struct ResolvedProfile {
 /// An entry in the include array - either a simple path string or a detailed object.
 #[derive(Deserialize, Debug)]
 #[serde(untagged)]
-pub(crate) enum IncludeEntry {
+pub enum IncludeEntry {
     /// Simple path string - uses "projects" profile by default
     Simple(String),
     /// Detailed entry with paths, profile, and optional overrides
@@ -159,6 +168,7 @@ impl IncludeEntry {
         match self {
             IncludeEntry::Simple(_) => Profile::default(),
             IncludeEntry::Detailed(d) => Profile {
+                base: None,
                 mode: d.mode,
                 markers: d.markers.clone(),
                 ignore: d.ignore.clone(),
@@ -174,7 +184,7 @@ impl IncludeEntry {
 
 /// Detailed include entry with all options.
 #[derive(Deserialize, Debug)]
-pub(crate) struct IncludeEntryDetailed {
+pub struct IncludeEntryDetailed {
     /// Paths to scan (always an array)
     pub paths: Vec<String>,
     /// Profile name to use as base
@@ -200,7 +210,7 @@ pub(crate) struct IncludeEntryDetailed {
 
 /// A predefined tmux session configuration.
 #[derive(Deserialize, Debug)]
-pub(crate) struct Session {
+pub struct Session {
     /// The session name (displayed in tmux status bar)
     pub name: String,
     /// List of paths for windows in this session (supports env vars)
@@ -235,7 +245,7 @@ struct RawConfig {
 
 /// Main configuration structure with resolved profiles.
 #[derive(Debug)]
-pub(crate) struct Config {
+pub struct Config {
     /// All profiles (defaults merged with user overrides)
     pub profiles: HashMap<String, Profile>,
     /// List of paths to scan with their settings
@@ -287,7 +297,7 @@ fn load_defaults() -> HashMap<String, Profile> {
 /// * `Ok(Config)` - Successfully parsed configuration
 /// * `Err(ConfigError::Read)` - File could not be read
 /// * `Err(ConfigError::Parse)` - File contents are not valid JSON
-pub(crate) fn read_config(path: &str) -> Result<Config, ConfigError> {
+pub fn read_config(path: &str) -> Result<Config, ConfigError> {
     let contents = std::fs::read_to_string(path)?;
     let raw: RawConfig = serde_jsonc::from_str(&contents)?;
 
@@ -301,6 +311,9 @@ pub(crate) fn read_config(path: &str) -> Result<Config, ConfigError> {
         profiles.insert(name, merged);
     }
 
+    // Resolve profile inheritance (base field)
+    profiles = resolve_inheritance(profiles)?;
+
     Ok(Config {
         profiles,
         include: if raw.include.is_empty() {
@@ -310,6 +323,59 @@ pub(crate) fn read_config(path: &str) -> Result<Config, ConfigError> {
         },
         sessions: raw.sessions,
     })
+}
+
+/// Resolve profile inheritance by processing `base` fields.
+/// Each profile with a `base` field inherits all fields from the base profile,
+/// with its own explicit fields taking precedence.
+pub fn resolve_inheritance(
+    mut profiles: HashMap<String, Profile>,
+) -> Result<HashMap<String, Profile>, ConfigError> {
+    // Get list of profile names that have a base
+    let profiles_with_base: Vec<String> = profiles
+        .iter()
+        .filter_map(|(name, profile)| profile.base.as_ref().map(|_| name.clone()))
+        .collect();
+
+    for name in profiles_with_base {
+        let resolved = resolve_single_profile(&name, &profiles, &mut Vec::new())?;
+        profiles.insert(name, resolved);
+    }
+
+    Ok(profiles)
+}
+
+/// Recursively resolve a single profile's inheritance chain.
+/// `visited` tracks visited profiles to detect circular dependencies.
+fn resolve_single_profile(
+    name: &str,
+    profiles: &HashMap<String, Profile>,
+    visited: &mut Vec<String>,
+) -> Result<Profile, ConfigError> {
+    // Check for circular dependency
+    if visited.contains(&name.to_string()) {
+        return Err(ConfigError::CircularInheritance(format!(
+            "{} -> {}",
+            visited.join(" -> "),
+            name
+        )));
+    }
+
+    let profile = profiles
+        .get(name)
+        .ok_or_else(|| ConfigError::CircularInheritance(format!("Profile '{}' not found", name)))?;
+
+    if let Some(base_name) = &profile.base {
+        visited.push(name.to_string());
+
+        // First resolve the base profile (in case it also has a base)
+        let base_profile = resolve_single_profile(base_name, profiles, visited)?;
+
+        // Merge: base profile fields, overridden by current profile's explicit fields
+        Ok(base_profile.merge(profile))
+    } else {
+        Ok(profile.clone())
+    }
 }
 
 #[cfg(test)]
@@ -327,6 +393,7 @@ mod tests {
     #[test]
     fn test_profile_merge_overrides_some_fields() {
         let base = Profile {
+            base: None,
             mode: Some(Mode::Dir),
             markers: Some(vec![".git".to_string()]),
             ignore: Some(vec!["node_modules".to_string()]),
@@ -336,8 +403,9 @@ mod tests {
             show_hidden: Some(false),
             traverse_hidden_dirs: Some(false),
         };
-        
+
         let override_profile = Profile {
+            base: None,
             mode: None,
             markers: Some(vec![".git".to_string(), "pom.xml".to_string()]),
             ignore: None,
@@ -364,6 +432,7 @@ mod tests {
     #[test]
     fn test_profile_resolve_with_defaults() {
         let profile = Profile {
+            base: None,
             mode: Some(Mode::File),
             markers: Some(vec!["*.rs".to_string()]),
             ignore: None,
@@ -500,6 +569,7 @@ mod tests {
     #[test]
     fn test_profile_merge_ignore_override() {
         let base = Profile {
+            base: None,
             mode: Some(Mode::Dir),
             markers: Some(vec![".git".to_string()]),
             ignore: Some(vec!["node_modules".to_string(), "target".to_string()]),
@@ -529,6 +599,7 @@ mod tests {
     fn test_resolve_profile_with_user_ignore() {
         // Simulate: defaults has ignore, user profile overrides ignore
         let defaults_profile = Profile {
+            base: None,
             mode: Some(Mode::Dir),
             markers: Some(vec![".git".to_string()]),
             ignore: Some(vec!["node_modules".to_string()]),
@@ -601,5 +672,173 @@ mod tests {
         assert!(resolved.ignore.contains(&"node_modules".to_string()));
         assert!(resolved.ignore.contains(&"target".to_string()));
         assert!(resolved.ignore.contains(&"venv".to_string()));
+    }
+
+    #[test]
+    fn test_profile_inheritance_basic() {
+        let mut profiles = HashMap::new();
+        profiles.insert(
+            "base_profile".to_string(),
+            Profile {
+                mode: Some(Mode::Dir),
+                markers: Some(vec![".git".to_string()]),
+                ignore: Some(vec!["node_modules".to_string()]),
+                depth: Some(10),
+                stop_on_marker: Some(true),
+                intermediate_paths: Some(true),
+                show_hidden: Some(false),
+                traverse_hidden_dirs: Some(false),
+                base: None,
+            },
+        );
+        profiles.insert(
+            "child_profile".to_string(),
+            Profile {
+                base: Some("base_profile".to_string()),
+                depth: Some(5), // Override depth
+                markers: Some(vec!["Cargo.toml".to_string()]), // Override markers
+                ..Default::default()
+            },
+        );
+
+        let resolved = resolve_inheritance(profiles).unwrap();
+        let child = resolved.get("child_profile").unwrap();
+
+        // Inherited from base
+        assert_eq!(child.mode, Some(Mode::Dir));
+        assert_eq!(child.ignore, Some(vec!["node_modules".to_string()]));
+        assert_eq!(child.stop_on_marker, Some(true));
+
+        // Overridden by child
+        assert_eq!(child.depth, Some(5));
+        assert_eq!(child.markers, Some(vec!["Cargo.toml".to_string()]));
+    }
+
+    #[test]
+    fn test_profile_inheritance_chain() {
+        let mut profiles = HashMap::new();
+        profiles.insert(
+            "grandparent".to_string(),
+            Profile {
+                mode: Some(Mode::Dir),
+                depth: Some(100),
+                markers: Some(vec![".git".to_string()]),
+                ..Default::default()
+            },
+        );
+        profiles.insert(
+            "parent".to_string(),
+            Profile {
+                base: Some("grandparent".to_string()),
+                depth: Some(50), // Override depth
+                ..Default::default()
+            },
+        );
+        profiles.insert(
+            "child".to_string(),
+            Profile {
+                base: Some("parent".to_string()),
+                depth: Some(10), // Override depth again
+                ..Default::default()
+            },
+        );
+
+        let resolved = resolve_inheritance(profiles).unwrap();
+        let child = resolved.get("child").unwrap();
+
+        // From grandparent
+        assert_eq!(child.mode, Some(Mode::Dir));
+        assert_eq!(child.markers, Some(vec![".git".to_string()]));
+
+        // Overridden by child (not parent's 50)
+        assert_eq!(child.depth, Some(10));
+    }
+
+    #[test]
+    fn test_profile_inheritance_missing_base() {
+        let mut profiles = HashMap::new();
+        profiles.insert(
+            "orphan".to_string(),
+            Profile {
+                base: Some("nonexistent".to_string()),
+                depth: Some(5),
+                ..Default::default()
+            },
+        );
+
+        let result = resolve_inheritance(profiles);
+        // Should return error when base profile is missing
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ConfigError::CircularInheritance(_)));
+    }
+
+    #[test]
+    fn test_profile_inheritance_circular_dependency() {
+        let mut profiles = HashMap::new();
+        profiles.insert(
+            "a".to_string(),
+            Profile {
+                base: Some("b".to_string()),
+                depth: Some(5),
+                ..Default::default()
+            },
+        );
+        profiles.insert(
+            "b".to_string(),
+            Profile {
+                base: Some("a".to_string()),
+                depth: Some(10),
+                ..Default::default()
+            },
+        );
+
+        let result = resolve_inheritance(profiles);
+        // Should return error for circular dependency
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ConfigError::CircularInheritance(_)));
+        // Error message should contain the cycle
+        assert!(err.to_string().contains("a"));
+        assert!(err.to_string().contains("b"));
+    }
+
+    #[test]
+    fn test_profile_inheritance_self_reference() {
+        let mut profiles = HashMap::new();
+        profiles.insert(
+            "self_ref".to_string(),
+            Profile {
+                base: Some("self_ref".to_string()),
+                depth: Some(5),
+                ..Default::default()
+            },
+        );
+
+        let result = resolve_inheritance(profiles);
+        // Should return error for self-reference
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_profile_inheritance_from_builtin() {
+        // Test that user profiles can inherit from built-in profiles
+        let mut profiles = load_defaults();
+        profiles.insert(
+            "my_projects".to_string(),
+            Profile {
+                base: Some("projects".to_string()),
+                depth: Some(3),
+                ..Default::default()
+            },
+        );
+
+        let resolved = resolve_inheritance(profiles).unwrap();
+        let my_projects = resolved.get("my_projects").unwrap();
+
+        // Should have markers from "projects" profile
+        assert!(my_projects.markers.as_ref().unwrap().contains(&".git".to_string()));
+        // But with overridden depth
+        assert_eq!(my_projects.depth, Some(3));
     }
 }

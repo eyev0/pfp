@@ -27,6 +27,7 @@ use crate::config::{read_config, Config, Session};
 use crate::context::AppContext;
 use crate::fs::{expand, trim_session_name, trim_window_name};
 use crate::selectors::{pick_project, select_from_list};
+use crate::Error;
 
 use clap::{Arg, ArgAction};
 
@@ -55,12 +56,12 @@ const SHELL_ARG: &str = "shell";
 ///
 /// Parses command-line arguments, loads configuration, and dispatches
 /// to the appropriate subcommand handler.
-pub(crate) fn cli() -> Result<(), super::Error> {
+pub fn cli() -> Result<(), crate::Error> {
     cli_with_context(AppContext::default())
 }
 
 /// CLI entry point with injectable context (for testing).
-pub(crate) fn cli_with_context(ctx: AppContext) -> Result<(), super::Error> {
+pub fn cli_with_context(ctx: AppContext) -> Result<(), crate::Error> {
     // parse cli args
     let mut cmd = clap::Command::new(APP_NAME)
         .about("Pfp helps you manage your projects with tmux sessions and windows")
@@ -115,7 +116,7 @@ pub(crate) fn cli_with_context(ctx: AppContext) -> Result<(), super::Error> {
 
     let config_path_raw = arg_matches
         .get_one::<String>(CONFIG_ARG)
-        .ok_or_else(|| super::Error::CmdArg(format!("error: wrong type used for {}", CONFIG_ARG)))?;
+        .ok_or_else(|| Error::CmdArg(format!("error: wrong type used for {}", CONFIG_ARG)))?;
     let is_default_path = config_path_raw == CONFIG_PATH_DEFAULT;
     let path = expand(config_path_raw)?;
 
@@ -144,7 +145,7 @@ pub(crate) fn cli_with_context(ctx: AppContext) -> Result<(), super::Error> {
         Some((INIT_SUBC, arg_matches)) => {
             let shell = arg_matches
                 .get_one::<String>(SHELL_ARG)
-                .ok_or_else(|| super::Error::CmdArg("shell argument required".to_string()))?;
+                .ok_or_else(|| Error::CmdArg("shell argument required".to_string()))?;
             print_shell_init(shell);
         }
         _ => println!("{}", help),
@@ -153,7 +154,7 @@ pub(crate) fn cli_with_context(ctx: AppContext) -> Result<(), super::Error> {
     Ok(())
 }
 
-fn handle_kill_session(ctx: &AppContext) -> Result<(), super::Error> {
+fn handle_kill_session(ctx: &AppContext) -> Result<(), Error> {
     let mut session_name =
         String::from_utf8(ctx.tmux_execute("tmux display-message -p '#S'")?.stdout)?;
     session_name.retain(|x| x != '\'' && x != '\n');
@@ -165,7 +166,7 @@ fn handle_kill_session(ctx: &AppContext) -> Result<(), super::Error> {
     Ok(())
 }
 
-fn handle_sessions(ctx: &AppContext) -> Result<(), super::Error> {
+fn handle_sessions(ctx: &AppContext) -> Result<(), Error> {
     let mut current_session =
         String::from_utf8(ctx.tmux_execute("tmux display-message -p '#S:#I'")?.stdout)?;
     current_session.retain(|x| x != '\'' && x != '\n');
@@ -215,7 +216,7 @@ fn handle_sessions(ctx: &AppContext) -> Result<(), super::Error> {
     Ok(())
 }
 
-fn handle_start(ctx: &AppContext, config: &Config, attach: bool) -> Result<(), super::Error> {
+fn handle_start(ctx: &AppContext, config: &Config, attach: bool) -> Result<(), Error> {
     let stdin_opt = if attach { Stdio::inherit() } else { Stdio::piped() };
     
     if config.sessions.is_empty() {
@@ -308,7 +309,7 @@ fn handle_start(ctx: &AppContext, config: &Config, attach: bool) -> Result<(), s
     Ok(())
 }
 
-fn handle_new_window(ctx: &AppContext, config: &Config) -> Result<(), super::Error> {
+fn handle_new_window(ctx: &AppContext, config: &Config) -> Result<(), Error> {
     let pick = pick_project(ctx, config, "New window:")?;
     ctx.tmux_window_command(
         &format!("tmux new-window -n {} -c {}", &trim_window_name(&pick)?, &pick),
@@ -317,7 +318,7 @@ fn handle_new_window(ctx: &AppContext, config: &Config) -> Result<(), super::Err
     Ok(())
 }
 
-fn handle_new_session(ctx: &AppContext, config: &Config) -> Result<(), super::Error> {
+fn handle_new_session(ctx: &AppContext, config: &Config) -> Result<(), Error> {
     let pick = pick_project(ctx, config, "New session:")?;
     let mut window_name = trim_window_name(&pick)?;
     let session_name = trim_session_name(&window_name);
@@ -335,7 +336,7 @@ fn handle_new_session(ctx: &AppContext, config: &Config) -> Result<(), super::Er
     Ok(())
 }
 
-fn handle_open(ctx: &AppContext, config: &Config) -> Result<(), super::Error> {
+fn handle_open(ctx: &AppContext, config: &Config) -> Result<(), Error> {
     let pick = pick_project(ctx, config, "Open:")?;
     println!("{}", pick);
     Ok(())

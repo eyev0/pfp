@@ -113,6 +113,21 @@ Add only the fields you want to change — they merge with defaults:
 }
 ```
 
+### Profile Inheritance
+
+Use the `base` field to create profiles that inherit from existing ones:
+
+```jsonc
+{
+  "profiles": {
+    "my_projects": {
+      "base": "projects",  // Inherit all fields from "projects"
+      "depth": 3           // Override only depth
+    }
+  }
+}
+```
+
 ## 📖 Commands
 
 | Command | Description |

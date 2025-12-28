@@ -73,12 +73,26 @@ See [`defaults.json`](../defaults.json) for full definitions.
 
 | Field | Type | Description |
 |-------|------|-------------|
+| `base` | `string` | Inherit from another profile |
 | `mode` | `"dir"` / `"file"` | Scan for directories or files |
 | `markers` | `string[]` | Patterns to match (glob: `*.sh`, `tree-*`) |
 | `ignore` | `string[]` | Patterns to skip |
 | `depth` | `number` | Max recursion depth |
 | `stop_on_marker` | `boolean` | Stop at project root |
 | `intermediate_paths` | `boolean` | Include parent dirs |
+
+## Profile Inheritance
+
+```jsonc
+{
+  "profiles": {
+    "my_projects": {
+      "base": "projects",  // Inherit from "projects"
+      "depth": 3           // Override depth only
+    }
+  }
+}
+```
 
 ## tmux.conf Keybindings
 
