@@ -44,6 +44,9 @@ pub enum ConfigError {
     /// File I/O error (file not found, permission denied, etc.)
     #[error("Read config: {0}")]
     Read(#[from] std::io::Error),
+    /// Circular profile inheritance detected
+    #[error("Circular profile inheritance: {0}")]
+    CircularInheritance(String),
 }
 
 /// Scanning mode for profiles.
@@ -309,7 +312,7 @@ pub fn read_config(path: &str) -> Result<Config, ConfigError> {
     }
 
     // Resolve profile inheritance (base field)
-    profiles = resolve_inheritance(profiles);
+    profiles = resolve_inheritance(profiles)?;
 
     Ok(Config {
         profiles,
@@ -325,7 +328,9 @@ pub fn read_config(path: &str) -> Result<Config, ConfigError> {
 /// Resolve profile inheritance by processing `base` fields.
 /// Each profile with a `base` field inherits all fields from the base profile,
 /// with its own explicit fields taking precedence.
-pub fn resolve_inheritance(mut profiles: HashMap<String, Profile>) -> HashMap<String, Profile> {
+pub fn resolve_inheritance(
+    mut profiles: HashMap<String, Profile>,
+) -> Result<HashMap<String, Profile>, ConfigError> {
     // Get list of profile names that have a base
     let profiles_with_base: Vec<String> = profiles
         .iter()
@@ -333,12 +338,11 @@ pub fn resolve_inheritance(mut profiles: HashMap<String, Profile>) -> HashMap<St
         .collect();
 
     for name in profiles_with_base {
-        if let Some(resolved) = resolve_single_profile(&name, &profiles, &mut Vec::new()) {
-            profiles.insert(name, resolved);
-        }
+        let resolved = resolve_single_profile(&name, &profiles, &mut Vec::new())?;
+        profiles.insert(name, resolved);
     }
 
-    profiles
+    Ok(profiles)
 }
 
 /// Recursively resolve a single profile's inheritance chain.
@@ -347,36 +351,30 @@ fn resolve_single_profile(
     name: &str,
     profiles: &HashMap<String, Profile>,
     visited: &mut Vec<String>,
-) -> Option<Profile> {
+) -> Result<Profile, ConfigError> {
     // Check for circular dependency
     if visited.contains(&name.to_string()) {
-        eprintln!(
-            "Warning: circular profile inheritance detected: {} -> {}",
+        return Err(ConfigError::CircularInheritance(format!(
+            "{} -> {}",
             visited.join(" -> "),
             name
-        );
-        return profiles.get(name).cloned();
+        )));
     }
 
-    let profile = profiles.get(name)?;
+    let profile = profiles
+        .get(name)
+        .ok_or_else(|| ConfigError::CircularInheritance(format!("Profile '{}' not found", name)))?;
 
     if let Some(base_name) = &profile.base {
         visited.push(name.to_string());
 
         // First resolve the base profile (in case it also has a base)
-        let base_profile = resolve_single_profile(base_name, profiles, visited)
-            .or_else(|| {
-                eprintln!(
-                    "Warning: base profile '{}' not found for profile '{}'",
-                    base_name, name
-                );
-                None
-            })?;
+        let base_profile = resolve_single_profile(base_name, profiles, visited)?;
 
         // Merge: base profile fields, overridden by current profile's explicit fields
-        Some(base_profile.merge(profile))
+        Ok(base_profile.merge(profile))
     } else {
-        Some(profile.clone())
+        Ok(profile.clone())
     }
 }
 
@@ -703,7 +701,7 @@ mod tests {
             },
         );
 
-        let resolved = resolve_inheritance(profiles);
+        let resolved = resolve_inheritance(profiles).unwrap();
         let child = resolved.get("child_profile").unwrap();
 
         // Inherited from base
@@ -745,7 +743,7 @@ mod tests {
             },
         );
 
-        let resolved = resolve_inheritance(profiles);
+        let resolved = resolve_inheritance(profiles).unwrap();
         let child = resolved.get("child").unwrap();
 
         // From grandparent
@@ -768,11 +766,58 @@ mod tests {
             },
         );
 
-        let resolved = resolve_inheritance(profiles);
-        // Profile should remain unchanged when base is missing
-        let orphan = resolved.get("orphan").unwrap();
-        assert_eq!(orphan.depth, Some(5));
-        assert!(orphan.base.is_some()); // base field preserved
+        let result = resolve_inheritance(profiles);
+        // Should return error when base profile is missing
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ConfigError::CircularInheritance(_)));
+    }
+
+    #[test]
+    fn test_profile_inheritance_circular_dependency() {
+        let mut profiles = HashMap::new();
+        profiles.insert(
+            "a".to_string(),
+            Profile {
+                base: Some("b".to_string()),
+                depth: Some(5),
+                ..Default::default()
+            },
+        );
+        profiles.insert(
+            "b".to_string(),
+            Profile {
+                base: Some("a".to_string()),
+                depth: Some(10),
+                ..Default::default()
+            },
+        );
+
+        let result = resolve_inheritance(profiles);
+        // Should return error for circular dependency
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(matches!(err, ConfigError::CircularInheritance(_)));
+        // Error message should contain the cycle
+        assert!(err.to_string().contains("a"));
+        assert!(err.to_string().contains("b"));
+    }
+
+    #[test]
+    fn test_profile_inheritance_self_reference() {
+        let mut profiles = HashMap::new();
+        profiles.insert(
+            "self_ref".to_string(),
+            Profile {
+                base: Some("self_ref".to_string()),
+                depth: Some(5),
+                ..Default::default()
+            },
+        );
+
+        let result = resolve_inheritance(profiles);
+        // Should return error for self-reference
+        assert!(result.is_err());
     }
 
     #[test]
@@ -788,7 +833,7 @@ mod tests {
             },
         );
 
-        let resolved = resolve_inheritance(profiles);
+        let resolved = resolve_inheritance(profiles).unwrap();
         let my_projects = resolved.get("my_projects").unwrap();
 
         // Should have markers from "projects" profile

@@ -337,4 +337,53 @@ fn test_profile_inheritance_with_inline_override() {
     assert_eq!(resolved.depth, 5); // Inline override
     assert_eq!(resolved.markers, vec![".git".to_string()]); // From inherited profile
 }
+#[test]
+fn test_profile_inheritance_circular_dependency() {
+    let temp = TempDir::new().unwrap();
+    let config_path = temp.path().join("config.json");
+
+    let config = r#"{
+        "profiles": {
+            "a": {
+                "base": "b",
+                "depth": 5
+            },
+            "b": {
+                "base": "a",
+                "depth": 10
+            }
+        },
+        "include": ["/tmp"]
+    }"#;
+
+    fs::write(&config_path, config).unwrap();
+
+    let result = read_config(config_path.to_str().unwrap());
+    // Should return error for circular dependency
+    assert!(result.is_err());
+    let err_msg = result.unwrap_err().to_string();
+    assert!(err_msg.contains("Circular"));
+}
+
+#[test]
+fn test_profile_inheritance_missing_base_error() {
+    let temp = TempDir::new().unwrap();
+    let config_path = temp.path().join("config.json");
+
+    let config = r#"{
+        "profiles": {
+            "orphan": {
+                "base": "nonexistent_profile",
+                "depth": 5
+            }
+        },
+        "include": ["/tmp"]
+    }"#;
+
+    fs::write(&config_path, config).unwrap();
+
+    let result = read_config(config_path.to_str().unwrap());
+    // Should return error when base profile doesn't exist
+    assert!(result.is_err());
+}
 
